@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { batchTranslateText, translateText } from "../utils/translate";
 import { useLocation } from "react-router-dom";
 
-import { groqJsonQuery } from "@/utils/groqApi";
+import { groqJsonQuery, groqQuery } from "@/utils/groqApi";
 
 interface CropRecommendation {
   crop: string;
@@ -586,7 +586,6 @@ const Crops = ({ selectedLang, texts, loading: externalLoading }) => {
     const fetchSuggestions = async () => {
       if (locationInput.length > 2) {
         try {
-          const { groqQuery } = await import('@/utils/groqApi');
           const response = await groqQuery(
             `Given the partial location "${locationInput}", suggest 5 most relevant Indian city/town/village names. Return ONLY a comma-separated list, nothing else.`,
             "You are a location suggestion system for India.",

@@ -2,8 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Menu, X, Cloud, Sun, LogIn, LogOut, LayoutDashboard, Leaf, Sprout, Recycle, TrendingUp, Bot, BarChart2 } from "lucide-react";
-import { supabase } from "@/pages/supabase";
-import { translateText } from "../utils/translate";
+import { clearAuthToken, fetchWithAuth } from "@/utils/authClient";
 
 
 
@@ -39,14 +38,19 @@ const Navigation = ({ selectedLang, setSelectedLang, texts, loading, languages }
 
   useEffect(() => {
     const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
+      try {
+        const res = await fetchWithAuth("/api/vendor/me");
+        if (!res.ok) {
+          setUser(null);
+          return;
+        }
+        const json = await res.json().catch(() => ({}));
+        setUser(json?.vendor ?? null);
+      } catch {
+        setUser(null);
+      }
     };
     checkAuth();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-    return () => subscription?.unsubscribe();
   }, []);
 
   const publicRoutes = [
@@ -64,7 +68,7 @@ const Navigation = ({ selectedLang, setSelectedLang, texts, loading, languages }
   ];
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    clearAuthToken();
     navigate("/");
     setIsOpen(false);
   };

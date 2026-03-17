@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { db } from "@/utils/dbClient"
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { motion } from "framer-motion";
 import { Loader2, User, Mail, Lock, MapPin, Phone, ArrowRight } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { setAuthToken } from "@/utils/authClient";
 
 const AuthPage = () => {
   const navigate = useNavigate();
@@ -33,19 +33,10 @@ const AuthPage = () => {
   const fetchLocations = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await db
-        .from('user_profiles')
-        .select('location')
-        .order('location');
-        
-      if (error) throw error;
-      
-      // Extract unique locations
-      const uniqueLocations = Array.from(
-        new Set(data?.map(item => item.location))
-      ).filter(Boolean);
-      
-      setAvailableLocations(uniqueLocations);
+      const res = await fetch("/api/vendor/locations");
+      if (!res.ok) throw new Error("Failed to fetch locations");
+      const json = await res.json();
+      setAvailableLocations(json.locations || []);
     } catch (error) {
       console.error('Error fetching locations:', error);
     } finally {
@@ -70,45 +61,44 @@ const AuthPage = () => {
     
     try {
       if (type === "signup") {
-        // First, create auth user
-        const { data, error: authError } = await db.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: fullName,
-              location: location,
-              phone_number: phoneNumber,
-            },
-          },
+        const res = await fetch("/api/vendor/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email,
+            password,
+            fullName,
+            location,
+            phoneNumber,
+          }),
         });
-        
-        if (authError) throw authError;
-        
-        // Then, ensure user profile exists
-        if (data.user) {
-          const { error: profileError } = await db
-            .from('user_profiles')
-            .upsert([
-              { 
-                id: data.user.id,
-                name: fullName,
-                location: location,
-                phone: phoneNumber,
-                role: 'vendor'
-              }
-            ]);
-            
-          if (profileError) throw profileError;
+
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg = json?.error === "email_exists" ? "Email already exists" : "Signup failed";
+          throw new Error(msg);
         }
+
+        if (json?.token) setAuthToken(json.token);
 
         toast({
           title: "Account Created",
           description: "Your vendor account has been created successfully!",
         });
       } else {
-        const { data, error } = await db.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        const res = await fetch("/api/vendor/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const msg = json?.error === "invalid_credentials" ? "Invalid email or password" : "Login failed";
+          throw new Error(msg);
+        }
+
+        if (json?.token) setAuthToken(json.token);
 
         toast({
           title: "Welcome Back!",

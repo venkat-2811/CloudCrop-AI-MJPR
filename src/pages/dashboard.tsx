@@ -6,9 +6,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/use-toast";
 import { motion } from "framer-motion";
-import { db } from '@/utils/dbClient';
 import { marketService, MarketPrice } from "@/services/marketService";
 import { Loader2, Package, IndianRupee, MapPin, CheckCircle2, XCircle } from "lucide-react";
+import { fetchWithAuth } from "@/utils/authClient";
 
 
 
@@ -45,13 +45,13 @@ const AgricultureVendorDashboard: React.FC = () => {
     const checkUserSession = async () => {
       try {
         setIsAuthLoading(true);
-        const { data: { session }, error } = await db.auth.getSession();
-        
-        if (error) throw error;
-        if (!session) return;
+        const res = await fetchWithAuth("/api/vendor/me");
+        if (!res.ok) return;
+        const json = await res.json().catch(() => ({}));
+        if (!json?.vendor?.id) return;
 
-        setUser({ id: session.user.id, email: session.user.email });
-        fetchMarketPrices(session.user.id);
+        setUser({ id: json.vendor.id, email: json.vendor.email });
+        fetchMarketPrices(json.vendor.id);
       } catch (error) {
         console.error('Error checking auth session:', error);
         showAlert('Authentication error. Please try logging in again.', 'error');
@@ -60,19 +60,8 @@ const AgricultureVendorDashboard: React.FC = () => {
       }
     };
 
-    const { data: authListener } = db.auth.onAuthStateChange(async (event, session) => {
-      if (session) {
-        setUser({ id: session.user.id, email: session.user.email });
-        fetchMarketPrices(session.user.id);
-      } else {
-        setUser(null);
-        setMarketPrices([]);
-        setLoading(false);
-      }
-    });
-
     checkUserSession();
-    return () => authListener.subscription.unsubscribe();
+    return;
   }, []);
 
   const fetchMarketPrices = async (userId: string) => {
@@ -135,13 +124,12 @@ const AgricultureVendorDashboard: React.FC = () => {
     if (!user) return;
 
     try {
-      const { error } = await db
-        .from('market_prices')
-        .delete()
-        .eq('vendor_id', user.id)
-        .eq('commodity', commodityName);
-
-      if (error) throw error;
+      const res = await fetchWithAuth("/api/market/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commodity: commodityName }),
+      });
+      if (!res.ok) throw new Error("delete_failed");
 
       setMarketPrices(marketPrices.filter(mp => mp.commodity !== commodityName));
       showAlert('Commodity deleted successfully', 'success');

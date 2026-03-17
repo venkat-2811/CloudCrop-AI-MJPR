@@ -3,13 +3,8 @@
  * All AI-powered features route through this module.
  */
 
-const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || "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";
-const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_API_URL = "/api/groq";
 const DEFAULT_MODEL = "llama-3.3-70b-versatile";
-
-if (!import.meta.env.VITE_GROQ_API_KEY) {
-  console.warn("Using hardcoded GROQ fallback. Restart your dev server to use .env!");
-}
 
 export interface GroqMessage {
   role: "system" | "user" | "assistant";
@@ -41,14 +36,10 @@ export async function groqChat(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${GROQ_API_KEY}`,
     },
     body: JSON.stringify({
-      model,
       messages,
-      temperature,
-      max_tokens: maxTokens,
-      top_p: topP,
+      options: { model, temperature, maxTokens, topP },
     }),
   });
 
@@ -58,8 +49,8 @@ export async function groqChat(
     throw new Error(`GROQ API error: ${response.status}`);
   }
 
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || "";
+  const data = await response.json().catch(() => ({}));
+  return data.content || "";
 }
 
 /**
@@ -189,4 +180,4 @@ export async function groqBatchTranslate(
   }
 }
 
-export { GROQ_API_KEY, GROQ_API_URL, DEFAULT_MODEL };
+export { GROQ_API_URL, DEFAULT_MODEL };

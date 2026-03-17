@@ -1,4 +1,4 @@
-import { db } from "@/utils/dbClient";
+import { fetchWithAuth } from "@/utils/authClient";
 
 export interface MarketPrice {
   id: string;
@@ -22,32 +22,17 @@ export const marketService = {
    */
   async getPrices(commodity?: string, location?: string): Promise<MarketPrice[]> {
     try {
-      let query = db
-        .from("market_prices")
-        .select(`
-          *,
-          user_profiles:vendor_id (
-            name,
-            phone,
-            location
-          )
-        `);
+      const params = new URLSearchParams();
+      if (commodity) params.set("commodity", commodity);
+      if (location) params.set("location", location);
 
-      if (commodity) query = query.ilike("commodity", `%${commodity}%`);
-      if (location) query = query.ilike("location", `%${location}%`);
-
-      const { data, error } = await query;
-
-      if (error) {
-        console.warn("Supabase fetch failed, falling back to mock data", error);
+      const res = await fetch(`/api/market/prices?${params.toString()}`);
+      if (!res.ok) {
+        console.warn("Market prices fetch failed, falling back to mock data", await res.text().catch(() => ""));
         return this.getMockPrices(commodity, location);
       }
-
-      return (data || []).map(item => ({
-        ...item,
-        vendor_name: item.user_profiles?.[0]?.name || "Anonymous Vendor",
-        vendor_contact: item.user_profiles?.[0]?.phone || "Not provided",
-      }));
+      const json = await res.json().catch(() => ({}));
+      return (json.prices || []) as MarketPrice[];
     } catch (err) {
       console.error("Market Service Error:", err);
       return this.getMockPrices(commodity, location);
@@ -58,11 +43,12 @@ export const marketService = {
    * Add a new market price
    */
   async addPrice(priceData: Partial<MarketPrice>): Promise<boolean> {
-    const { error } = await db
-      .from("market_prices")
-      .insert([priceData]);
-
-    return !error;
+    const res = await fetchWithAuth("/api/market/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(priceData),
+    });
+    return res.ok;
   },
 
   /**

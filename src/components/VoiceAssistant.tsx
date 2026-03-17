@@ -46,6 +46,11 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
     setResponse('');
     lastTranscriptRef.current = '';
 
+    if (!window.isSecureContext) {
+      setError('Voice input requires HTTPS (secure context). Please use the deployed site or enable HTTPS locally.');
+      return;
+    }
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setError('Voice input is not supported in this browser. Please use Chrome or Edge.');
@@ -98,7 +103,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
       } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         setError('Microphone access denied or not available. Please check browser permissions.');
       } else if (event.error === 'network') {
-        setError('Network error during voice recognition. If you are using Brave or a restricted network, this API may be blocked. Please try Chrome or Edge.');
+        setError('Voice recognition network error. Common causes: mic permission blocked, insecure HTTP site, or restricted networks/trackers blocking the speech service. Please try Chrome/Edge on HTTPS and allow microphone.');
       } else {
         setError(`Voice recognition error: ${event.error}. Please try again.`);
       }
@@ -151,7 +156,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
   };
 
   const stopSpeaking = () => {
-    synthRef.current.cancel();
+    synthRef.current?.cancel();
     setIsSpeaking(false);
   };
 
