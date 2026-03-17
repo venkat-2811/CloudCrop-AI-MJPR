@@ -24,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     await pool.query(
-      "INSERT INTO market_prices (id, commodity, price, unit, location, active, vendor_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO market_prices (id, commodity, price, unit, location, active, vendor_id) VALUES ($1, $2, $3, $4, $5, $6, $7)",
       [id, commodity, Number(price), unit, location, active === false ? false : true, vendor.id]
     );
     res.status(201).json({ ok: true, id });

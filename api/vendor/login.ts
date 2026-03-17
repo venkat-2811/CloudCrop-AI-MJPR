@@ -18,12 +18,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   await ensureSchema();
 
   try {
-    const [rows] = await pool.query<any[]>(
-      "SELECT id, email, password_hash, full_name FROM vendors WHERE email = ? LIMIT 1",
+    const result = await pool.query<any>(
+      "SELECT id, email, password_hash, full_name FROM vendors WHERE email = $1 LIMIT 1",
       [String(email).toLowerCase()]
     );
 
-    const vendor = rows?.[0];
+    const vendor = result.rows?.[0];
     if (!vendor) {
       res.status(401).json({ error: "invalid_credentials" });
       return;

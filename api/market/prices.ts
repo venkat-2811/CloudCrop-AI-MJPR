@@ -17,11 +17,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const where: string[] = ["mp.active = TRUE"]; 
 
     if (commodity) {
-      where.push("mp.commodity LIKE ?");
+      where.push(`mp.commodity ILIKE $${params.length + 1}`);
       params.push(`%${commodity}%`);
     }
     if (location) {
-      where.push("mp.location LIKE ?");
+      where.push(`mp.location ILIKE $${params.length + 1}`);
       params.push(`%${location}%`);
     }
 
@@ -44,8 +44,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       LIMIT 500
     `;
 
-    const [rows] = await pool.query<any[]>(sql, params);
-    res.status(200).json({ prices: rows || [] });
+    const result = await pool.query<any>(sql, params);
+    res.status(200).json({ prices: result.rows || [] });
   } catch (e) {
     console.error("Market prices error:", e);
     res.status(500).json({ error: "server_error" });

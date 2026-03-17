@@ -10,12 +10,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   await ensureSchema();
 
   try {
-    const [rows] = await pool.query<any[]>(
+    const result = await pool.query<{ location?: string }>(
       "SELECT DISTINCT location FROM vendors WHERE location IS NOT NULL AND location <> '' ORDER BY location ASC"
     );
     res
       .status(200)
-      .json({ locations: (rows || []).map((r: { location?: string }) => r.location).filter(Boolean) });
+      .json({ locations: (result.rows || []).map((r: { location?: string }) => r.location).filter(Boolean) });
   } catch (e) {
     console.error("Vendor locations error:", e);
     res.status(500).json({ error: "server_error" });

@@ -21,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     await pool.query(
-      "DELETE FROM market_prices WHERE vendor_id = ? AND commodity = ?",
+      "DELETE FROM market_prices WHERE vendor_id = $1 AND commodity = $2",
       [vendor.id, commodity]
     );
     res.status(200).json({ ok: true });

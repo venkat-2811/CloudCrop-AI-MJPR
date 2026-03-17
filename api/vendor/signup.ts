@@ -24,15 +24,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     await pool.query(
-      "INSERT INTO vendors (id, email, password_hash, full_name, location, phone) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO vendors (id, email, password_hash, full_name, location, phone) VALUES ($1, $2, $3, $4, $5, $6)",
       [id, String(email).toLowerCase(), passwordHash, fullName, location, phoneNumber || null]
     );
 
     const token = signVendorJwt({ id, email: String(email).toLowerCase(), full_name: fullName });
     res.status(201).json({ token, vendor: { id, email: String(email).toLowerCase(), full_name: fullName } });
   } catch (e: any) {
+    const code = String(e?.code || "");
     const msg = String(e?.message || "");
-    if (msg.toLowerCase().includes("duplicate") || msg.toLowerCase().includes("unique")) {
+    if (code === "23505" || msg.toLowerCase().includes("unique")) {
       res.status(409).json({ error: "email_exists" });
       return;
     }
