@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { pool, ensureSchema } from "../_db";
-import { requireVendor } from "../_auth";
+import { pool, ensureSchema } from "../_db.js";
+import { requireVendor } from "../_auth.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
