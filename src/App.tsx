@@ -196,11 +196,20 @@ const App = () => {
 
     // Check localStorage cache first
     const cached = getTranslationCache(newLang);
-    if (cached && Object.keys(cached).length === Object.keys(defaultTexts).length) {
+    const expectedKeyCount = Object.keys(defaultTexts).length;
+
+    if (cached && Object.keys(cached).length === expectedKeyCount) {
       setTexts(cached);
       setSelectedLang(newLang);
       saveUserProfile({ language: newLang });
       return;
+    }
+
+    // Clear stale cache with mismatched keys
+    if (cached) {
+      try {
+        localStorage.removeItem(`cloudcrop_translations_${newLang}`);
+      } catch {}
     }
 
     setLoading(true);
@@ -210,18 +219,33 @@ const App = () => {
 
       const translated = await groqTranslate(values, newLang);
 
+      // Count how many strings were actually translated (differ from originals)
+      let translatedCount = 0;
       const newTexts: Record<string, string> = {};
       keys.forEach((key, i) => {
-        newTexts[key] = translated[i] || defaultTexts[key];
+        const val = translated[i];
+        if (val && typeof val === "string" && val.trim()) {
+          newTexts[key] = val;
+          if (val !== defaultTexts[key]) translatedCount++;
+        } else {
+          newTexts[key] = defaultTexts[key];
+        }
       });
 
       setTexts(newTexts);
       setSelectedLang(newLang);
-      setTranslationCache(newLang, newTexts);
       saveUserProfile({ language: newLang });
+
+      // Only cache if we actually got meaningful translations (at least 50% changed)
+      if (translatedCount > expectedKeyCount * 0.5) {
+        setTranslationCache(newLang, newTexts);
+      }
     } catch (error) {
       console.error("Translation error:", error);
+      // Keep the current language but show English texts as fallback
       setTexts(defaultTexts);
+      setSelectedLang(newLang);
+      saveUserProfile({ language: newLang });
     } finally {
       setLoading(false);
     }

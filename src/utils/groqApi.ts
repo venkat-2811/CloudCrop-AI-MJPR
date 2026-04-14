@@ -106,6 +106,7 @@ export async function groqJsonQuery<T>(
 /**
  * Batch-translates UI strings to target language.
  * Splits large arrays into chunks to avoid token limits.
+ * Uses retry logic and per-item fallback for robustness.
  * Returns translated strings (falls back to originals on error).
  */
 export async function groqTranslate(
@@ -122,37 +123,94 @@ export async function groqTranslate(
   };
 
   const langName = langNames[targetLang] || targetLang;
-  const CHUNK_SIZE = 30; // Stay within GROQ token limits per request
+  const CHUNK_SIZE = 15; // Smaller chunks for more reliable LLM output
 
   /**
-   * Translate a single chunk and parse the JSON array response.
+   * Extract a JSON array from a potentially messy LLM response.
    */
-  async function translateChunk(chunk: string[]): Promise<string[]> {
-    const raw = await groqChat(
-      [
-        {
-          role: "system",
-          content: `You are a professional translator. Translate the provided JSON array of UI strings to ${langName}. Rules: (1) Return ONLY a valid JSON array with no preamble or explanation. (2) Keep "CloudCrop AI" unchanged. (3) Output array MUST have exactly the same number of elements as the input.`,
-        },
-        { role: "user", content: JSON.stringify(chunk) },
-      ],
-      { temperature: 0.1, maxTokens: 4096 }
-    );
-
-    const cleaned = raw
-      .replace(/```json\n?/g, "")
-      .replace(/```\n?/g, "")
+  function extractJsonArray(raw: string): any[] | null {
+    // Strip markdown fences, explanatory text, etc.
+    let cleaned = raw
+      .replace(/```json\s*/gi, "")
+      .replace(/```\s*/g, "")
+      .replace(/^[^[]*/, "") // remove everything before first [
+      .replace(/][^]]*$/, "]") // remove everything after last ]
       .trim();
 
+    // Try to find a JSON array
     const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (Array.isArray(parsed) && parsed.length === chunk.length) {
-        return parsed as string[];
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // Try fixing common issues: trailing commas, unescaped quotes
+        try {
+          const fixed = jsonMatch[0]
+            .replace(/,\s*]/g, "]")
+            .replace(/,\s*}/g, "}");
+          const parsed = JSON.parse(fixed);
+          if (Array.isArray(parsed)) return parsed;
+        } catch {
+          // give up
+        }
       }
     }
-    // Return originals if parse fails
-    return chunk;
+    return null;
+  }
+
+  /**
+   * Translate a single chunk with one retry on failure.
+   */
+  async function translateChunk(chunk: string[], attempt = 0): Promise<string[]> {
+    try {
+      const raw = await groqChat(
+        [
+          {
+            role: "system",
+            content: `You are a JSON translation API. Translate the input JSON array of short UI strings into ${langName}. CRITICAL RULES:\n1. Output ONLY a raw JSON array — no markdown, no explanation, no code fences.\n2. The output array MUST contain EXACTLY ${chunk.length} elements.\n3. Keep the brand name "CloudCrop AI" unchanged.\n4. Each translated string should be concise (similar length to original).`,
+          },
+          { role: "user", content: JSON.stringify(chunk) },
+        ],
+        { temperature: 0.1, maxTokens: 4096 }
+      );
+
+      const parsed = extractJsonArray(raw);
+
+      if (parsed && parsed.length === chunk.length) {
+        // Ensure all items are strings, fall back to original for non-strings
+        return parsed.map((item, i) =>
+          typeof item === "string" && item.trim() ? item : chunk[i]
+        );
+      }
+
+      // If parsed but wrong length, try to salvage what we can
+      if (parsed && parsed.length > 0) {
+        console.warn(`Translation chunk: expected ${chunk.length} items, got ${parsed.length}. Salvaging...`);
+        return chunk.map((original, i) => {
+          const translated = parsed[i];
+          return typeof translated === "string" && translated.trim() ? translated : original;
+        });
+      }
+
+      // Retry once
+      if (attempt < 1) {
+        console.warn("Translation parse failed, retrying chunk...");
+        return translateChunk(chunk, attempt + 1);
+      }
+
+      console.warn("Translation chunk failed after retry, using originals");
+      return chunk;
+    } catch (error) {
+      if (attempt < 1) {
+        console.warn("Translation chunk error, retrying:", error);
+        // Small delay before retry
+        await new Promise(r => setTimeout(r, 500));
+        return translateChunk(chunk, attempt + 1);
+      }
+      console.error("Translation chunk failed after retry:", error);
+      return chunk;
+    }
   }
 
   try {
@@ -164,8 +222,8 @@ export async function groqTranslate(
 
     // Translate each chunk sequentially (avoids rate limiting)
     const results: string[] = [];
-    for (const chunk of chunks) {
-      const translated = await translateChunk(chunk);
+    for (let i = 0; i < chunks.length; i++) {
+      const translated = await translateChunk(chunks[i]);
       results.push(...translated);
     }
 

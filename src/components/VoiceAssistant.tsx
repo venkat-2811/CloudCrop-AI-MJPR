@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, Volume2, X, Loader2, MessageCircle, Globe } from 'lucide-react';
+import { Mic, MicOff, Volume2, X, Loader2, MessageCircle, Globe, Send, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { motion, AnimatePresence } from 'framer-motion';
-import { groqChat } from '@/utils/groqApi';
+import { groqChat, checkGroqApiHealth } from '@/utils/groqApi';
 
 interface VoiceAssistantProps {
   selectedLang: string;
@@ -35,6 +36,8 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
   const [transcript, setTranscript] = useState('');
   const [response, setResponse] = useState('');
   const [error, setError] = useState('');
+  const [textInput, setTextInput] = useState('');
+  const [apiHealthy, setApiHealthy] = useState<boolean | null>(null);
   const recognitionRef = useRef<any>(null);
   // Safe: initialize synthRef lazily in useEffect to avoid SSR/undefined window issues
   const synthRef = useRef<SpeechSynthesis | null>(null);
@@ -50,6 +53,18 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
       synthRef.current?.cancel();
     };
   }, []);
+
+  // Check API health when panel opens
+  useEffect(() => {
+    if (isOpen && apiHealthy === null) {
+      checkGroqApiHealth().then(result => {
+        setApiHealthy(result.ok);
+        if (!result.ok) {
+          console.warn('GROQ API health check failed:', result.error);
+        }
+      });
+    }
+  }, [isOpen]);
 
   // Stop speaking when language changes so old utterance doesn't overlap
   useEffect(() => {
@@ -69,15 +84,21 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
     setResponse('');
     lastTranscriptRef.current = '';
 
+    // Check API health first
+    if (apiHealthy === false) {
+      setError('The AI service is currently unavailable. Please type your question below instead.');
+      return;
+    }
+
     if (typeof window === 'undefined' || !window.isSecureContext) {
-      setError('Voice input requires HTTPS. Please use the deployed site or localhost.');
+      setError('Voice input requires HTTPS. Please use the deployed site or localhost. You can type your question below.');
       return;
     }
 
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      setError('Voice input is not supported in this browser. Please use Chrome or Edge.');
+      setError('Voice input is not supported in this browser. Please use Chrome or Edge, or type your question below.');
       return;
     }
 
@@ -113,13 +134,17 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
     recognition.onerror = (event: any) => {
       setIsListening(false);
       if (event.error === 'no-speech') {
-        setError('No speech detected. Please speak clearly into the microphone.');
+        setError('No speech detected. Please speak clearly into the microphone, or type your question below.');
       } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setError('Microphone access denied. Please allow microphone permission in your browser.');
+        setError('Microphone access denied. Please allow microphone permission in your browser settings, or type your question below.');
       } else if (event.error === 'network') {
-        setError('Speech recognition requires internet access. Please check your connection and try again on HTTPS.');
+        setError('Speech recognition service is unavailable (requires internet and HTTPS). Please type your question below instead.');
+      } else if (event.error === 'audio-capture') {
+        setError('No microphone found. Please connect a microphone, or type your question below.');
+      } else if (event.error === 'aborted') {
+        // User aborted, no error needed
       } else {
-        setError(`Voice recognition error: ${event.error}. Please try again.`);
+        setError(`Voice recognition error: ${event.error}. You can type your question below instead.`);
       }
     };
 
@@ -153,12 +178,28 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
       const finalResponse = responseText || 'Sorry, I could not process your question.';
       setResponse(finalResponse);
       speakText(finalResponse);
-    } catch (err) {
-      setError('Failed to get a response. Please check your internet connection and try again.');
+    } catch (err: any) {
+      // Differentiate API errors from network errors
+      const errMsg = err?.message || '';
+      if (errMsg.includes('500') || errMsg.includes('502')) {
+        setError('The AI service encountered an error. The GROQ API key may not be configured. Please try again later.');
+      } else if (errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError')) {
+        setError('Cannot reach the AI service. Please check your internet connection and try again.');
+      } else {
+        setError('Failed to get a response from the AI service. Please try again.');
+      }
       console.error('Voice assistant error:', err);
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleTextSubmit = () => {
+    const query = textInput.trim();
+    if (!query || isProcessing) return;
+    setTranscript(query);
+    setTextInput('');
+    processQuery(query);
   };
 
   const speakText = (text: string) => {
@@ -228,6 +269,14 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
 
             {/* Content */}
             <div className="p-4 max-h-80 overflow-y-auto">
+              {/* API Warning */}
+              {apiHealthy === false && (
+                <div className="bg-amber-50 text-amber-700 text-sm p-3 rounded-lg mb-3 border border-amber-100 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>AI service may be unavailable. You can still type your question below.</span>
+                </div>
+              )}
+
               {error && (
                 <div className="bg-red-50 text-red-700 text-sm p-3 rounded-lg mb-3 border border-red-100">
                   {error}
@@ -258,13 +307,14 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
                 </div>
               )}
 
-              {!transcript && !response && !error && !isListening && !isProcessing && (
+              {!transcript && !response && !error && !isListening && !isProcessing && apiHealthy !== false && (
                 <div className="text-center py-6 text-gray-500">
                   <Mic className="w-10 h-10 mx-auto mb-2 text-green-300" />
                   <p className="text-sm">
                     Press the mic and ask about crops, weather, prices, or farming tips in{' '}
                     <span className="font-medium text-green-600">{currentLangNative}</span>
                   </p>
+                  <p className="text-xs text-gray-400 mt-1">Or type your question below</p>
                 </div>
               )}
 
@@ -279,6 +329,29 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
                   <p className="text-sm text-red-600 mt-3 font-medium">Listening in {currentLangNative}...</p>
                 </div>
               )}
+            </div>
+
+            {/* Text Input Fallback */}
+            <div className="px-3 pb-2">
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleTextSubmit()}
+                  placeholder={`Type in ${currentLangNative}...`}
+                  className="flex-1 text-sm h-9 border-green-100 focus-visible:ring-green-200"
+                  disabled={isProcessing}
+                />
+                <Button
+                  onClick={handleTextSubmit}
+                  disabled={isProcessing || !textInput.trim()}
+                  className="rounded-full w-9 h-9 bg-green-500 hover:bg-green-600 text-white p-0"
+                  size="icon"
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
 
             {/* Controls */}
