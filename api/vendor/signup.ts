@@ -10,7 +10,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const { email, password, fullName, location, phoneNumber } = req.body || {};
+  const { email, password, fullName, location, phoneNumber, businessName } = req.body || {};
 
   if (!email || !password || !fullName || !location) {
     res.status(400).json({ error: "missing_fields" });
@@ -24,12 +24,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     await pool.query(
-      "INSERT INTO vendors (id, email, password_hash, full_name, location, phone) VALUES ($1, $2, $3, $4, $5, $6)",
-      [id, String(email).toLowerCase(), passwordHash, fullName, location, phoneNumber || null]
+      "INSERT INTO vendors (id, email, password_hash, full_name, location, phone, business_name) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+      [id, String(email).toLowerCase(), passwordHash, fullName, location, phoneNumber || null, businessName || null]
     );
 
     const token = signVendorJwt({ id, email: String(email).toLowerCase(), full_name: fullName });
-    res.status(201).json({ token, vendor: { id, email: String(email).toLowerCase(), full_name: fullName } });
+    res.status(201).json({ token, vendor: { id, fullName, email: String(email).toLowerCase(), location } });
   } catch (e: any) {
     const code = String(e?.code || "");
     const msg = String(e?.message || "");

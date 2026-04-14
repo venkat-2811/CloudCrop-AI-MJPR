@@ -151,8 +151,8 @@ export function decisionFusion(
 export function getRecommendationColor(level: RecommendationLevel): string {
   switch (level) {
     case 'Strong': return 'bg-green-100 text-green-800 border-green-300';
-    case 'Moderate': return 'bg-blue-100 text-blue-800 border-blue-300';
-    case 'Weak': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+    case 'Moderate': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+    case 'Weak': return 'bg-orange-100 text-orange-800 border-orange-300';
     case 'Avoid': return 'bg-red-100 text-red-800 border-red-300';
   }
 }

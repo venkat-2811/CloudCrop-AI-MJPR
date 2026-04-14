@@ -2,9 +2,11 @@ import React, { useState, useRef, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Loader2, Send, Bot, User, Leaf, Cloud, TrendingUp, BarChart2, Mic, MicOff, Sparkles } from "lucide-react";
+import { Loader2, Send, Bot, User, Leaf, Cloud, TrendingUp, Bug, Landmark, Droplets, Mic, MicOff, Sparkles, Trash2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { groqChat, type GroqMessage } from "@/utils/groqApi";
+import type { PageProps } from "@/types/common";
+import { getUserProfile, addInteraction } from "@/utils/userProfile";
 
 interface Message {
   role: "user" | "assistant";
@@ -13,43 +15,29 @@ interface Message {
 }
 
 const quickActions = [
-  { label: "Best crops for my region", icon: Leaf, prompt: "What are the best crops to grow in my region based on current weather and soil conditions?" },
-  { label: "Weather advisory", icon: Cloud, prompt: "Give me a farming weather advisory for the current season in central India." },
-  { label: "Market price analysis", icon: TrendingUp, prompt: "Analyze the current market trends for major crops in India and suggest which crops to sell now." },
-  { label: "Yield improvement tips", icon: BarChart2, prompt: "How can I improve my crop yield this season? Give practical tips." },
+  { label: "Best crop for my region", icon: Leaf },
+  { label: "Current market prices", icon: TrendingUp },
+  { label: "Weather advisory", icon: Cloud },
+  { label: "Pest control tips", icon: Bug },
+  { label: "Government schemes", icon: Landmark },
+  { label: "Irrigation planning", icon: Droplets },
 ];
 
 const langToSpeechCode: Record<string, string> = {
   en: "en-IN", hi: "hi-IN", te: "te-IN", ta: "ta-IN", mr: "mr-IN",
   bn: "bn-IN", pa: "pa-IN", gu: "gu-IN", kn: "kn-IN", ml: "ml-IN",
-  ur: "ur-IN", or: "or-IN", as: "as-IN", sa: "sa-IN",
+  ur: "ur-IN", or: "or-IN", as: "as-IN", bho: "hi-IN",
 };
 
 const langNames: Record<string, string> = {
   en: "English", hi: "Hindi", te: "Telugu", ta: "Tamil", mr: "Marathi",
   bn: "Bengali", kn: "Kannada", ml: "Malayalam", gu: "Gujarati",
-  pa: "Punjabi", ur: "Urdu", or: "Odia", as: "Assamese", sa: "Sanskrit",
+  pa: "Punjabi", ur: "Urdu", or: "Odia", as: "Assamese", bho: "Bhojpuri",
 };
 
-const SYSTEM_PROMPT = `You are CloudCrop AI, a knowledgeable and friendly agricultural advisor for Indian farmers. You have expertise in:
+const SYSTEM_PROMPT = `You are CloudCrop AI, a knowledgeable agricultural advisor for Indian farmers with deep expertise in: crop selection and rotation, weather-based farming decisions, market price intelligence, soil health and fertilizer recommendations, pest and disease management, irrigation planning, yield optimization, government schemes (PMFBY, PM-KISAN, MSP, e-NAM, Kisan Credit Card), and sustainable farming practices. Always provide specific, practical, actionable advice. When asked about prices or yield, give realistic numbers relevant to Indian agriculture.`;
 
-1. **Crop Recommendations**: Suggesting crops based on soil type, weather, region, and market trends
-2. **Weather Guidance**: Interpreting weather data for farming decisions
-3. **Market Intelligence**: Agricultural commodity prices, trends, and best time to sell
-4. **Soil Analysis**: Soil types, nutrient content, and improvement methods
-5. **Yield Estimation**: Predicting crop yields based on multiple factors
-6. **Sustainable Farming**: Eco-friendly practices, organic farming, pest control
-7. **Government Schemes**: Indian agricultural subsidies, insurance (PMFBY), MSP information
-
-Guidelines:
-- Give practical, actionable advice suitable for small and medium Indian farmers
-- Use simple language, avoid jargon
-- Include specific numbers when possible (prices, quantities, dates)
-- Mention relevant Indian government schemes when applicable
-- Format responses with clear sections using headers and bullet points
-- Be encouraging and supportive`;
-
-const Advisor = ({ selectedLang, texts, loading: externalLoading }) => {
+const Advisor = ({ selectedLang, texts, loading: externalLoading }: PageProps) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -82,12 +70,16 @@ const Advisor = ({ selectedLang, texts, loading: externalLoading }) => {
     try {
       const languageName = langNames[selectedLang] || "English";
       const langInstruction = selectedLang !== "en"
-        ? `\n\nIMPORTANT: Respond in ${languageName} language.`
+        ? `\nRespond in ${languageName} language only.`
         : "";
 
-      // Build conversation history for context
+      const profile = getUserProfile();
+      const profileContext = profile.location || profile.cropPreferences.length
+        ? `\nUser profile: ${JSON.stringify(profile)}`
+        : "";
+
       const conversationHistory: GroqMessage[] = [
-        { role: "system", content: SYSTEM_PROMPT + langInstruction },
+        { role: "system", content: SYSTEM_PROMPT + langInstruction + profileContext },
       ];
 
       // Add last 6 messages for context
@@ -109,6 +101,11 @@ const Advisor = ({ selectedLang, texts, loading: externalLoading }) => {
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+
+      // Append interaction summary to profile
+      try {
+        addInteraction(text.trim().slice(0, 100));
+      } catch {}
     } catch (err) {
       console.error("Advisor error:", err);
       setMessages(prev => [...prev, {
@@ -118,6 +115,16 @@ const Advisor = ({ selectedLang, texts, loading: externalLoading }) => {
       }]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleClearChat = () => {
+    if (window.confirm(texts?.clearChatConfirm || "Are you sure you want to clear the chat history?")) {
+      setMessages([{
+        role: "assistant",
+        content: "Chat cleared. How can I help you today?",
+        timestamp: new Date(),
+      }]);
     }
   };
 
@@ -177,15 +184,23 @@ const Advisor = ({ selectedLang, texts, loading: externalLoading }) => {
             className="text-center mb-6 mt-12"
           >
             <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-green-800 to-emerald-600 bg-clip-text text-transparent mb-3">
-              AI Agricultural Advisor
+              {texts?.advisorTitle || "AI Agricultural Advisor"}
             </h1>
             <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-              Ask anything about farming — crops, weather, markets, soil, or tips
+              {texts?.advisorSubtitle || "Ask anything about farming — crops, weather, markets, soil, or tips"}
             </p>
           </motion.div>
 
           {/* Chat Container */}
           <div className="w-full max-w-3xl">
+            {/* Clear Chat Button */}
+            {messages.length > 1 && (
+              <div className="flex justify-end mb-2">
+                <Button variant="ghost" size="sm" onClick={handleClearChat} className="text-gray-500 hover:text-red-500">
+                  <Trash2 className="w-4 h-4 mr-1" />{texts?.clearChat || "Clear Chat"}
+                </Button>
+              </div>
+            )}
             {/* Messages */}
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-lg border border-purple-100 mb-4 overflow-hidden">
               <div className="h-[55vh] overflow-y-auto p-4 space-y-4">
@@ -245,16 +260,16 @@ const Advisor = ({ selectedLang, texts, loading: externalLoading }) => {
 
             {/* Quick Actions */}
             {messages.length <= 1 && (
-              <div className="grid grid-cols-2 gap-2 mb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
                 {quickActions.map((action, idx) => (
                   <Button
                     key={idx}
                     variant="outline"
-                    className="h-auto p-3 text-left border-purple-100 hover:bg-purple-50 hover:border-purple-200 transition-all"
-                    onClick={() => sendMessage(action.prompt)}
+                    className="h-auto p-3 text-left border-green-100 hover:bg-green-50 hover:border-green-200 transition-all"
+                    onClick={() => setInput(action.label)}
                     disabled={loading}
                   >
-                    <action.icon className="w-4 h-4 mr-2 text-purple-500 flex-shrink-0" />
+                    <action.icon className="w-4 h-4 mr-2 text-green-500 flex-shrink-0" />
                     <span className="text-xs text-gray-700">{action.label}</span>
                   </Button>
                 ))}

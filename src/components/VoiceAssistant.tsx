@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, MicOff, Volume2, X, Loader2, MessageCircle } from 'lucide-react';
+import { Mic, MicOff, Volume2, X, Loader2, MessageCircle, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { motion, AnimatePresence } from 'framer-motion';
 import { groqChat } from '@/utils/groqApi';
@@ -10,15 +10,21 @@ interface VoiceAssistantProps {
 }
 
 const langToSpeechCode: Record<string, string> = {
-  en: 'en-IN', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', mr: 'mr-IN',
-  bn: 'bn-IN', pa: 'pa-IN', gu: 'gu-IN', kn: 'kn-IN', ml: 'ml-IN',
-  ur: 'ur-IN', or: 'or-IN', as: 'as-IN', sa: 'sa-IN',
+  en: 'en-IN', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN', kn: 'kn-IN',
+  mr: 'mr-IN', bn: 'bn-IN', gu: 'gu-IN', pa: 'pa-IN', ml: 'ml-IN',
+  or: 'or-IN', as: 'as-IN', ur: 'ur-IN', bho: 'hi-IN',
 };
 
 const langNames: Record<string, string> = {
-  en: 'English', hi: 'Hindi', te: 'Telugu', ta: 'Tamil', mr: 'Marathi',
-  bn: 'Bengali', kn: 'Kannada', ml: 'Malayalam', gu: 'Gujarati',
-  pa: 'Punjabi', ur: 'Urdu', or: 'Odia', as: 'Assamese', sa: 'Sanskrit',
+  en: 'English', hi: 'Hindi', te: 'Telugu', ta: 'Tamil', kn: 'Kannada',
+  mr: 'Marathi', bn: 'Bengali', gu: 'Gujarati', pa: 'Punjabi',
+  ml: 'Malayalam', or: 'Odia', as: 'Assamese', ur: 'Urdu', bho: 'Bhojpuri',
+};
+
+const langNativeNames: Record<string, string> = {
+  en: 'English', hi: 'हिन्दी', te: 'తెలుగు', ta: 'தமிழ்', kn: 'ಕನ್ನಡ',
+  mr: 'मराठी', bn: 'বাংলা', gu: 'ગુજરાતી', pa: 'ਪੰਜਾਬੀ',
+  ml: 'മലയാളം', or: 'ଓଡ଼ିଆ', as: 'অসমীয়া', ur: 'اردو', bho: 'भोजपुरी',
 };
 
 const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
@@ -30,15 +36,32 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
   const [response, setResponse] = useState('');
   const [error, setError] = useState('');
   const recognitionRef = useRef<any>(null);
-  const synthRef = useRef(window.speechSynthesis);
+  // Safe: initialize synthRef lazily in useEffect to avoid SSR/undefined window issues
+  const synthRef = useRef<SpeechSynthesis | null>(null);
   const lastTranscriptRef = useRef('');
 
+  // Initialize speechSynthesis safely after mount
   useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      synthRef.current = window.speechSynthesis;
+    }
     return () => {
       if (recognitionRef.current) recognitionRef.current.abort();
-      synthRef.current.cancel();
+      synthRef.current?.cancel();
     };
   }, []);
+
+  // Stop speaking when language changes so old utterance doesn't overlap
+  useEffect(() => {
+    synthRef.current?.cancel();
+    setIsSpeaking(false);
+    // Reset transcript/response on language switch so user gets a fresh start
+    if (isOpen) {
+      setTranscript('');
+      setResponse('');
+      setError('');
+    }
+  }, [selectedLang]);
 
   const startListening = () => {
     setError('');
@@ -46,12 +69,13 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
     setResponse('');
     lastTranscriptRef.current = '';
 
-    if (!window.isSecureContext) {
-      setError('Voice input requires HTTPS (secure context). Please use the deployed site or enable HTTPS locally.');
+    if (typeof window === 'undefined' || !window.isSecureContext) {
+      setError('Voice input requires HTTPS. Please use the deployed site or localhost.');
       return;
     }
 
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setError('Voice input is not supported in this browser. Please use Chrome or Edge.');
       return;
@@ -76,34 +100,24 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
       const current = finalTranscript || interimTranscript;
       setTranscript(current);
       lastTranscriptRef.current = current;
-      console.log("Voice Recognition Result:", current);
     };
 
     recognition.onend = () => {
       setIsListening(false);
       const finalText = lastTranscriptRef.current.trim();
-      console.log("Voice Recognition Ended. Final Text:", finalText);
       if (finalText) {
         processQuery(finalText);
-      } else if (!error) {
-        // Only show "No speech detected" if there wasn't a more specific error already
-        // But often onend fires if the user just stops talking, so we check if there's any text
-        if (!lastTranscriptRef.current.trim()) {
-           // Don't necessarily error here, let the user try again
-        }
       }
     };
 
     recognition.onerror = (event: any) => {
-      console.error("Speech Recognition Error:", event.error, event.message);
       setIsListening(false);
       if (event.error === 'no-speech') {
-        // This often happens if the user doesn't say anything for a few seconds
         setError('No speech detected. Please speak clearly into the microphone.');
       } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setError('Microphone access denied or not available. Please check browser permissions.');
+        setError('Microphone access denied. Please allow microphone permission in your browser.');
       } else if (event.error === 'network') {
-        setError('Voice recognition network error. Common causes: mic permission blocked, insecure HTTP site, or restricted networks/trackers blocking the speech service. Please try Chrome/Edge on HTTPS and allow microphone.');
+        setError('Speech recognition requires internet access. Please check your connection and try again on HTTPS.');
       } else {
         setError(`Voice recognition error: ${event.error}. Please try again.`);
       }
@@ -125,18 +139,22 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
     try {
       const languageName = langNames[selectedLang] || 'English';
 
-      const responseText = await groqChat([
-        {
-          role: "system",
-          content: `You are CloudCrop AI, a helpful agricultural assistant for Indian farmers. You help with crop recommendations, weather guidance, market prices, soil analysis, and farming tips. Keep responses concise (2-3 sentences) since they will be spoken aloud. Respond in ${languageName} language.`,
-        },
-        { role: "user", content: query },
-      ], { temperature: 0.7, maxTokens: 300 });
+      const responseText = await groqChat(
+        [
+          {
+            role: 'system',
+            content: `You are CloudCrop AI, a voice-first agricultural assistant for Indian farmers. Provide practical, actionable advice on crops, weather, market prices, pests, irrigation, and government schemes like PMFBY and MSP. Always respond concisely in ${languageName} language. Keep your answer under 3 sentences.`,
+          },
+          { role: 'user', content: query },
+        ],
+        { temperature: 0.7, maxTokens: 300 }
+      );
 
-      setResponse(responseText || 'Sorry, I could not process your question.');
-      speakText(responseText);
+      const finalResponse = responseText || 'Sorry, I could not process your question.';
+      setResponse(finalResponse);
+      speakText(finalResponse);
     } catch (err) {
-      setError('Failed to get response. Please try again.');
+      setError('Failed to get a response. Please check your internet connection and try again.');
       console.error('Voice assistant error:', err);
     } finally {
       setIsProcessing(false);
@@ -144,6 +162,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
   };
 
   const speakText = (text: string) => {
+    if (!synthRef.current) return;
     synthRef.current.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = langToSpeechCode[selectedLang] || 'en-IN';
@@ -160,6 +179,8 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
     setIsSpeaking(false);
   };
 
+  const currentLangNative = langNativeNames[selectedLang] || 'English';
+
   return (
     <>
       <motion.div
@@ -171,9 +192,12 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
         <Button
           onClick={() => setIsOpen(!isOpen)}
           className={`rounded-full w-14 h-14 shadow-xl ${
-            isOpen ? 'bg-red-500 hover:bg-red-600' : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700'
+            isOpen
+              ? 'bg-red-500 hover:bg-red-600'
+              : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700'
           } text-white transition-all duration-300`}
           size="icon"
+          title={isOpen ? 'Close voice assistant' : `Voice Assistant (${currentLangNative})`}
         >
           {isOpen ? <X className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
         </Button>
@@ -188,43 +212,59 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
             transition={{ duration: 0.2 }}
             className="fixed bottom-24 right-6 z-50 w-80 bg-white rounded-2xl shadow-2xl border border-green-100 overflow-hidden"
           >
+            {/* Header */}
             <div className="bg-gradient-to-r from-green-500 to-emerald-600 p-4 text-white">
               <h3 className="font-bold text-lg flex items-center gap-2">
                 <Mic className="w-5 h-5" />
                 CloudCrop AI Voice
               </h3>
-              <p className="text-sm text-green-100">Tap the mic and ask anything about farming</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <Globe className="w-3.5 h-3.5 text-green-200" />
+                <p className="text-sm text-green-100">
+                  Listening in <span className="font-semibold text-white">{currentLangNative}</span>
+                </p>
+              </div>
             </div>
 
+            {/* Content */}
             <div className="p-4 max-h-80 overflow-y-auto">
               {error && (
-                <div className="bg-red-50 text-red-700 text-sm p-3 rounded-lg mb-3 border border-red-100">{error}</div>
+                <div className="bg-red-50 text-red-700 text-sm p-3 rounded-lg mb-3 border border-red-100">
+                  {error}
+                </div>
               )}
 
               {transcript && (
                 <div className="mb-3">
                   <p className="text-xs text-gray-500 mb-1">You said:</p>
-                  <div className="bg-amber-50 text-amber-900 p-3 rounded-lg text-sm border border-amber-100">{transcript}</div>
+                  <div className="bg-amber-50 text-amber-900 p-3 rounded-lg text-sm border border-amber-100">
+                    {transcript}
+                  </div>
                 </div>
               )}
 
               {isProcessing && (
                 <div className="flex items-center gap-2 text-sm text-green-700 mb-3">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Thinking...
+                  <Loader2 className="w-4 h-4 animate-spin" /> Thinking in {currentLangNative}...
                 </div>
               )}
 
               {response && (
                 <div className="mb-3">
                   <p className="text-xs text-gray-500 mb-1">CloudCrop AI:</p>
-                  <div className="bg-green-50 text-green-900 p-3 rounded-lg text-sm border border-green-100">{response}</div>
+                  <div className="bg-green-50 text-green-900 p-3 rounded-lg text-sm border border-green-100">
+                    {response}
+                  </div>
                 </div>
               )}
 
               {!transcript && !response && !error && !isListening && !isProcessing && (
                 <div className="text-center py-6 text-gray-500">
                   <Mic className="w-10 h-10 mx-auto mb-2 text-green-300" />
-                  <p className="text-sm">Press the mic button and ask about crops, weather, prices, or farming tips</p>
+                  <p className="text-sm">
+                    Press the mic and ask about crops, weather, prices, or farming tips in{' '}
+                    <span className="font-medium text-green-600">{currentLangNative}</span>
+                  </p>
                 </div>
               )}
 
@@ -236,23 +276,40 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ selectedLang }) => {
                     </div>
                     <div className="absolute inset-0 rounded-full border-2 border-red-300 animate-ping" />
                   </div>
-                  <p className="text-sm text-red-600 mt-3 font-medium">Listening...</p>
+                  <p className="text-sm text-red-600 mt-3 font-medium">Listening in {currentLangNative}...</p>
                 </div>
               )}
             </div>
 
+            {/* Controls */}
             <div className="p-3 border-t border-green-100 bg-gray-50 flex justify-center gap-3">
               {!isListening ? (
-                <Button onClick={startListening} disabled={isProcessing} className="rounded-full w-12 h-12 bg-green-500 hover:bg-green-600 text-white shadow-md" size="icon">
+                <Button
+                  onClick={startListening}
+                  disabled={isProcessing}
+                  className="rounded-full w-12 h-12 bg-green-500 hover:bg-green-600 text-white shadow-md"
+                  size="icon"
+                  title={`Speak in ${currentLangNative}`}
+                >
                   <Mic className="w-5 h-5" />
                 </Button>
               ) : (
-                <Button onClick={stopListening} className="rounded-full w-12 h-12 bg-red-500 hover:bg-red-600 text-white shadow-md animate-pulse" size="icon">
+                <Button
+                  onClick={stopListening}
+                  className="rounded-full w-12 h-12 bg-red-500 hover:bg-red-600 text-white shadow-md animate-pulse"
+                  size="icon"
+                >
                   <MicOff className="w-5 h-5" />
                 </Button>
               )}
               {isSpeaking && (
-                <Button onClick={stopSpeaking} variant="outline" className="rounded-full w-12 h-12 border-amber-300 text-amber-600" size="icon">
+                <Button
+                  onClick={stopSpeaking}
+                  variant="outline"
+                  className="rounded-full w-12 h-12 border-amber-300 text-amber-600"
+                  size="icon"
+                  title="Stop speaking"
+                >
                   <Volume2 className="w-5 h-5" />
                 </Button>
               )}

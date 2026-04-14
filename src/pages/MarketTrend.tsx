@@ -4,34 +4,30 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { marketService, MarketPrice } from "@/services/marketService";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Search, MapPin, Calendar, IndianRupee, Phone, Building2 } from "lucide-react";
-import { groqQuery } from "@/utils/groqApi";
+import { Search, MapPin, Calendar, IndianRupee, Phone, Building2, Loader2, Sparkles } from "lucide-react";
+import { groqQuery, groqJsonQuery } from "@/utils/groqApi";
+import type { PageProps } from "@/types/common";
 
-interface MarketPriceSearchProps {
-  selectedLang: string;
-  texts?: any;
-  loading?: boolean;
-}
+const formatCurrency = (amount: number) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(amount);
 
-const defaultTexts = {
-  pageTitle: "Agricultural Market Prices",
-  pageSubtitle: "Find real-time market prices for agricultural commodities across India",
-  commodityPlaceholder: "Search commodity (e.g., Wheat, Rice)",
-  locationPlaceholder: "Location (District/State)",
-  searchButton: "Search Prices",
-  searching: "Searching...",
-  noResults: "No matching prices found. Try different search terms.",
-  price: "Price",
-  updated: "Updated",
-  vendorDetails: "Vendor Details",
-  showContact: "Show Contact",
-  hideContact: "Hide Contact",
-  active: "Active",
-  closed: "Closed",
-  notAvailable: "Not available"
+const Sparkline = ({ data }: { data: number[] }) => {
+  if (!data || data.length < 2) return null;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const w = 100;
+  const h = 30;
+  const points = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * h}`).join(" ");
+  const trending = data[data.length - 1] >= data[0];
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-24 h-8 inline-block" preserveAspectRatio="none">
+      <polyline fill="none" stroke={trending ? "#16a34a" : "#dc2626"} strokeWidth="2" points={points} />
+    </svg>
+  );
 };
 
-export default function MarketPriceSearch({ selectedLang, texts = defaultTexts, loading: externalLoading }: MarketPriceSearchProps) {
+export default function MarketPriceSearch({ selectedLang, texts, loading: externalLoading }: PageProps) {
   const [commodity, setCommodity] = useState("");
   const [location, setLocation] = useState("");
   const [prices, setPrices] = useState<MarketPrice[]>([]);
@@ -46,6 +42,9 @@ export default function MarketPriceSearch({ selectedLang, texts = defaultTexts, 
   const commodityInputRef = useRef<HTMLInputElement>(null);
   const locationInputRef = useRef<HTMLInputElement>(null);
 
+  const [isAiEstimated, setIsAiEstimated] = useState(false);
+  const [sparklineData, setSparklineData] = useState<Record<string, number[]>>({});
+
   const fetchMarketPrices = async () => {
     if (!commodity.trim() && !location.trim()) {
       setError("Please enter a commodity name or location to search");
@@ -55,10 +54,51 @@ export default function MarketPriceSearch({ selectedLang, texts = defaultTexts, 
     setLoading(true);
     setError(null);
     setSearchPerformed(true);
+    setIsAiEstimated(false);
+    setSparklineData({});
 
     try {
       const data = await marketService.getPrices(commodity, location);
-      setPrices(data);
+
+      if (data.length === 0) {
+        // AI fallback
+        try {
+          const aiData = await groqJsonQuery<any[]>(
+            `Estimate current market prices for "${commodity || "common crops"}" in "${location || "India"}". Return a JSON array of objects: [{"commodity": "<name>", "price": <number INR per quintal>, "location": "<market location>", "trend": "up|down|stable"}]. Include 3-5 entries. Return ONLY valid JSON.`
+          );
+          if (Array.isArray(aiData) && aiData.length > 0) {
+            const mapped: MarketPrice[] = aiData.map((item, idx) => ({
+              id: `ai-${idx}`,
+              commodity: item.commodity || commodity,
+              price: item.price || 0,
+              unit: "quintal",
+              location: item.location || location,
+              active: true,
+              created_at: new Date().toISOString(),
+              vendor_id: null,
+            }));
+            setPrices(mapped);
+            setIsAiEstimated(true);
+          } else {
+            setPrices([]);
+          }
+        } catch {
+          setPrices([]);
+        }
+      } else {
+        setPrices(data);
+      }
+
+      // Generate sparkline data for each result
+      try {
+        const sparkPrompt = `Generate 7-day price trend data for commodities. Return a JSON object where keys are commodity names and values are arrays of 7 numbers (daily prices in INR). Commodities: ${commodity || "Wheat, Rice"}. Return ONLY valid JSON.`;
+        const sparkData = await groqJsonQuery<Record<string, number[]>>(sparkPrompt);
+        if (sparkData && typeof sparkData === "object") {
+          setSparklineData(sparkData);
+        }
+      } catch {
+        // sparkline is optional, don't fail
+      }
     } catch (err) {
       console.error("Fetch error:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch prices.");
@@ -71,12 +111,6 @@ export default function MarketPriceSearch({ selectedLang, texts = defaultTexts, 
     setShowContacts(prev => ({ ...prev, [priceId]: !prev[priceId] }));
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR'
-    }).format(amount);
-  };
 
   const handleCommoditySuggestionClick = (suggestion: string) => {
     setCommodity(suggestion);
@@ -158,9 +192,18 @@ export default function MarketPriceSearch({ selectedLang, texts = defaultTexts, 
     <div className="min-h-screen bg-gradient-to-br from-amber-100 via-orange-50 to-amber-50 font-sans">
       <div className="container mx-auto px-4 pt-32 pb-10">
         <div className="text-center mb-16">
-          <h1 className="text-3xl sm:text-4xl font-extrabold text-amber-900 mb-3 tracking-tight">{texts.pageTitle}</h1>
-          <p className="text-lg text-amber-800 max-w-2xl mx-auto">{texts.pageSubtitle}</p>
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-amber-900 mb-3 tracking-tight">{texts?.marketPageTitle || "Agricultural Market Prices"}</h1>
+          <p className="text-lg text-amber-800 max-w-2xl mx-auto">{texts?.marketPageSubtitle || "Find real-time market prices for agricultural commodities across India"}</p>
         </div>
+
+        {isAiEstimated && (
+          <div className="max-w-2xl mx-auto mb-4">
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-2 rounded-lg text-sm">
+              <Sparkles className="w-4 h-4" />
+              <span className="font-medium">{texts?.aiEstimated || "AI Estimated"}</span> — No database records found. Showing AI-powered estimates.
+            </div>
+          </div>
+        )}
 
         {error && (
           <Alert variant="destructive" className="mb-6 max-w-2xl mx-auto">
@@ -179,7 +222,7 @@ export default function MarketPriceSearch({ selectedLang, texts = defaultTexts, 
                   value={commodity}
                   onChange={(e) => setCommodity(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && fetchMarketPrices()}
-                  placeholder={texts.commodityPlaceholder}
+                  placeholder={texts?.commodityPlaceholder || "Search commodity (e.g., Wheat, Rice)"}
                   className="pl-10 bg-gray-50"
                 />
                 {showCommoditySuggestions && commoditySuggestions.length > 0 && (
@@ -201,7 +244,7 @@ export default function MarketPriceSearch({ selectedLang, texts = defaultTexts, 
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && fetchMarketPrices()}
-                  placeholder={texts.locationPlaceholder}
+                  placeholder={texts?.locationPlaceholder || "Location (District/State)"}
                   className="pl-10 bg-gray-50"
                 />
                 {showLocationSuggestions && locationSuggestions.length > 0 && (
@@ -216,15 +259,15 @@ export default function MarketPriceSearch({ selectedLang, texts = defaultTexts, 
               </div>
             </div>
             <Button onClick={fetchMarketPrices} disabled={loading} className="w-full mt-4 bg-amber-800 hover:bg-amber-900 text-white font-semibold">
-              {loading ? texts.searching : texts.searchButton}
+              {loading ? (<><Loader2 className="w-4 h-4 animate-spin mr-2" />{texts?.searching || "Searching..."}</>) : (texts?.searchPrices || "Search Prices")}
             </Button>
           </div>
         </div>
 
         <div className="max-w-4xl mx-auto">
-          {searchPerformed && prices.length === 0 ? (
+          {searchPerformed && prices.length === 0 && !loading ? (
             <div className="text-center bg-white rounded-xl shadow-lg p-8 text-lg text-gray-600">
-              {loading ? texts.searching : texts.noResults}
+              {texts?.noResults || "No matching prices found. Try different search terms."}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -237,31 +280,34 @@ export default function MarketPriceSearch({ selectedLang, texts = defaultTexts, 
                         <div className="text-sm text-gray-600 flex items-center"><MapPin className="w-4 h-4 mr-1" />{priceEntry.location}</div>
                       </div>
                       <span className={`text-sm font-semibold px-3 py-1 rounded-full ${priceEntry.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
-                        {priceEntry.active ? texts.active : texts.closed}
+                        {priceEntry.active ? (texts?.active || "Active") : (texts?.closed || "Closed")}
                       </span>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 mb-4">
                       <div className="bg-amber-50 p-3 rounded-lg">
-                        <div className="text-amber-900 font-medium flex items-center"><IndianRupee className="w-4 h-4 mr-1" />{texts.price}</div>
+                        <div className="text-amber-900 font-medium flex items-center"><IndianRupee className="w-4 h-4 mr-1" />{texts?.price || "Price"}</div>
                         <p className="text-lg font-bold text-amber-900">{formatCurrency(priceEntry.price)}/{priceEntry.unit}</p>
+                        {sparklineData[priceEntry.commodity] && (
+                          <Sparkline data={sparklineData[priceEntry.commodity]} />
+                        )}
                       </div>
                       <div className="bg-amber-50 p-3 rounded-lg">
-                        <div className="text-amber-900 font-medium flex items-center"><Calendar className="w-4 h-4 mr-1" />{texts.updated}</div>
+                        <div className="text-amber-900 font-medium flex items-center"><Calendar className="w-4 h-4 mr-1" />{texts?.updated || "Updated"}</div>
                         <p className="text-lg font-bold text-amber-900">{new Date(priceEntry.created_at).toLocaleDateString()}</p>
                       </div>
                     </div>
 
                     {(priceEntry.vendor_name || priceEntry.vendor_contact) && (
                       <div className="border-t pt-4">
-                        <div className="flex items-center text-gray-600 mb-2"><Building2 className="w-4 h-4 mr-1" />{texts.vendorDetails}</div>
+                        <div className="flex items-center text-gray-600 mb-2"><Building2 className="w-4 h-4 mr-1" />{texts?.vendorDetails || "Vendor Details"}</div>
                         <Button variant="outline" onClick={() => toggleContact(priceEntry.id)} className="w-full text-amber-900 border-gray-300">
-                          {showContacts[priceEntry.id] ? texts.hideContact : texts.showContact}
+                          {showContacts[priceEntry.id] ? (texts?.hideContact || "Hide Contact") : (texts?.showContact || "Show Contact")}
                         </Button>
                         {showContacts[priceEntry.id] && (
                           <div className="mt-3 text-sm bg-gray-50 p-3 rounded-lg space-y-2">
                             <div className="flex items-center font-bold text-amber-900">{priceEntry.vendor_name}</div>
-                            <div className="flex items-center"><Phone className="w-4 h-4 mr-2" />{priceEntry.vendor_contact || texts.notAvailable}</div>
+                            <div className="flex items-center"><Phone className="w-4 h-4 mr-2" />{priceEntry.vendor_contact || (texts?.notAvailable || "Not available")}</div>
                             <div className="flex items-center"><MapPin className="w-4 h-4 mr-2" />{priceEntry.location}</div>
                           </div>
                         )}

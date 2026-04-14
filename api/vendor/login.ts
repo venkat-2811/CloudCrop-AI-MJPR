@@ -19,7 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const result = await pool.query<any>(
-      "SELECT id, email, password_hash, full_name FROM vendors WHERE email = $1 LIMIT 1",
+      "SELECT id, email, password_hash, full_name, location FROM vendors WHERE email = $1 LIMIT 1",
       [String(email).toLowerCase()]
     );
 
@@ -36,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const token = signVendorJwt({ id: vendor.id, email: vendor.email, full_name: vendor.full_name });
-    res.status(200).json({ token, vendor: { id: vendor.id, email: vendor.email, full_name: vendor.full_name } });
+    res.status(200).json({ token, vendor: { id: vendor.id, fullName: vendor.full_name, email: vendor.email, location: vendor.location } });
   } catch (e) {
     console.error("Vendor login error:", e);
     res.status(500).json({ error: "server_error" });

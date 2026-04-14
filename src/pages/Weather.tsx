@@ -4,11 +4,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Cloud, Droplets, Wind, Thermometer, Search, Calendar, ThumbsUp, ThumbsDown, BarChart2, Languages } from "lucide-react";
+import { Loader2, Cloud, Droplets, Wind, Thermometer, Search, ThumbsUp, ThumbsDown } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import { batchTranslateText, translateText } from "../utils/translate";
-import { groqQuery } from "@/utils/groqApi";
+import { groqQuery, groqTranslate } from "@/utils/groqApi";
+import type { PageProps } from "@/types/common";
+import { getUserProfile } from "@/utils/userProfile";
 
 // Interfaces for data types
 interface WeatherData {
@@ -121,7 +121,7 @@ async function fetchForecast(location) {
   return response.json();
 }
 
-const WeatherApp = ({ selectedLang, texts, loading }) => {
+const WeatherApp = ({ selectedLang, texts, loading }: PageProps) => {
   // State declarations
   const [location, setLocation] = useState("");
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
@@ -143,6 +143,11 @@ const WeatherApp = ({ selectedLang, texts, loading }) => {
     const savedPoll = localStorage.getItem("weatherPoll");
     if (savedPoll) {
       setPollData(JSON.parse(savedPoll));
+    }
+    // Pre-fill location from user profile
+    const profile = getUserProfile();
+    if (profile.location) {
+      setLocation(profile.location);
     }
   }, []);
 
@@ -330,25 +335,36 @@ const WeatherApp = ({ selectedLang, texts, loading }) => {
     return <span className="text-3xl">{iconMap[icon] || "🌤️"}</span>;
   };
 
-  // Translate advisory when it changes or language changes
+  // Generate and translate advisory when weather data changes
   useEffect(() => {
     if (!weatherData || !forecast.length) {
       setTranslatedAdvisory("");
       return;
     }
-    let advisory = "";
-    if (weatherData.weather[0].description.includes("rain")) {
-      advisory = "Rain expected in your area. Hold off on applying fertilizers or pesticides as they may wash away. This is a good time for planting if your soil isn't waterlogged. Consider checking drainage systems in fields.";
-    } else if (weatherData.main.temp > 30) {
-      advisory = "High temperatures expected. Ensure crops receive adequate irrigation, preferably in early morning or evening to minimize evaporation. Monitor for heat stress in livestock and provide ample shade and water.";
-    } else {
-      advisory = "Weather conditions are favorable for most farming activities. A good time for field work, crop maintenance, and regular irrigation. Monitor soil moisture levels as moderate temperatures continue.";
-    }
-    if (selectedLang === "en") {
-      setTranslatedAdvisory(advisory);
-    } else {
-      translateText(advisory, selectedLang).then(setTranslatedAdvisory);
-    }
+
+    const generateAdvisory = async () => {
+      try {
+        const weatherContext = `Location: ${weatherData.name}, Temperature: ${weatherData.main.temp}°C, Humidity: ${weatherData.main.humidity}%, Wind: ${weatherData.wind.speed} m/s, Conditions: ${weatherData.weather[0].description}, 5-day forecast: ${forecast.map(d => `${d.date}: ${d.temp}°C, ${d.description}, ${d.rainChance}% rain`).join("; ")}`;
+
+        const advisory = await groqQuery(
+          `Based on this weather data for an Indian farmer:\n${weatherContext}\n\nProvide specific crop/irrigation/pest advice relevant to these conditions. Keep it concise (3-4 sentences).`,
+          "You are an agricultural weather advisor for Indian farmers. Provide practical, actionable farming advice based on weather conditions.",
+          { temperature: 0.4, maxTokens: 500 }
+        );
+
+        if (selectedLang === "en") {
+          setTranslatedAdvisory(advisory);
+        } else {
+          const [translated] = await groqTranslate([advisory], selectedLang);
+          setTranslatedAdvisory(translated);
+        }
+      } catch (err) {
+        console.error("Advisory generation error:", err);
+        setTranslatedAdvisory("Weather advisory is temporarily unavailable. Please try again later.");
+      }
+    };
+
+    generateAdvisory();
   }, [weatherData, forecast, selectedLang]);
 
   // Format date for display

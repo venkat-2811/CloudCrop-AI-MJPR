@@ -5,11 +5,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion } from "framer-motion";
-import { Loader2, User, Mail, Lock, MapPin, Phone, ArrowRight } from "lucide-react";
+import { Loader2, User, Mail, Lock, MapPin, Phone, ArrowRight, Building } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import { setAuthToken } from "@/utils/authClient";
+import { setToken } from "@/utils/authClient";
+import type { PageProps } from "@/types/common";
 
-const AuthPage = () => {
+const AuthPage = ({ selectedLang, texts, loading: externalLoading }: PageProps) => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [type, setType] = useState("login");
@@ -18,7 +19,8 @@ const AuthPage = () => {
   const [fullName, setFullName] = useState("");
   const [location, setLocation] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [error, setError] = useState(null);
+  const [businessName, setBusinessName] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [availableLocations, setAvailableLocations] = useState([]);
   const [locationInputType, setLocationInputType] = useState("select");
   const [isLoading, setIsLoading] = useState(false);
@@ -70,6 +72,7 @@ const AuthPage = () => {
             fullName,
             location,
             phoneNumber,
+            businessName,
           }),
         });
 
@@ -79,7 +82,7 @@ const AuthPage = () => {
           throw new Error(msg);
         }
 
-        if (json?.token) setAuthToken(json.token);
+        if (json?.token) setToken(json.token);
 
         toast({
           title: "Account Created",
@@ -98,7 +101,7 @@ const AuthPage = () => {
           throw new Error(msg);
         }
 
-        if (json?.token) setAuthToken(json.token);
+        if (json?.token) setToken(json.token);
 
         toast({
           title: "Welcome Back!",
@@ -106,12 +109,12 @@ const AuthPage = () => {
         });
       }
       
-      navigate("/dashboard");
-    } catch (error) {
+      navigate("/");
+    } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Authentication Error",
-        description: error.message,
+        description: error?.message || "An unexpected error occurred",
       });
     } finally {
       setIsLoading(false);
@@ -136,12 +139,12 @@ const AuthPage = () => {
             <Card className="border-amber-100/50 backdrop-blur-md bg-white/70 shadow-xl">
               <CardHeader className="bg-amber-50/50 backdrop-blur-sm border-b border-amber-100/50">
                 <CardTitle className="text-2xl text-amber-900">
-                  {type === "signup" ? "Vendor Sign Up" : "Vendor Login"}
+                  {type === "signup" ? (texts?.vendorSignUp || "Vendor Sign Up") : (texts?.vendorLogin || "Vendor Login")}
                 </CardTitle>
                 <CardDescription className="text-amber-800">
                   {type === "signup" 
-                    ? "Create your vendor account to start listing prices" 
-                    : "Sign in to manage your commodity listings"}
+                    ? (texts?.signUpDesc || "Create your vendor account to start listing prices") 
+                    : (texts?.loginDesc || "Sign in to manage your commodity listings")}
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-6 space-y-4 bg-white/50 backdrop-blur-sm">
@@ -214,7 +217,21 @@ const AuthPage = () => {
                     </div>
 
                     <div className="space-y-2">
-                      <label className="text-sm font-medium text-amber-900">Phone Number</label>
+                      <label className="text-sm font-medium text-amber-900">{texts?.businessName || "Business Name"}</label>
+                      <div className="relative">
+                        <Input
+                          type="text"
+                          value={businessName}
+                          onChange={(e) => setBusinessName(e.target.value)}
+                          placeholder="Your business or farm name"
+                          className="pl-8"
+                        />
+                        <Building className="absolute left-3 top-2.5 h-5 w-5 text-amber-600" />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-amber-900">{texts?.phone || "Phone"}</label>
                       <div className="relative">
                         <Input
                           type="text"
@@ -269,7 +286,7 @@ const AuthPage = () => {
                     </>
                   ) : (
                     <>
-                      {type === "signup" ? "Sign Up as Vendor" : "Login"}
+                      {type === "signup" ? (texts?.signUp || "Sign Up as Vendor") : (texts?.login || "Login")}
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </>
                   )}
@@ -278,24 +295,24 @@ const AuthPage = () => {
                 <p className="text-center text-sm text-amber-800">
                   {type === "signup" ? (
                     <>
-                      Already have an account?{" "}
+                      {texts?.alreadyHaveAccount || "Already have an account?"}{" "}
                       <Button
                         variant="link"
                         onClick={() => setType("login")}
                         className="text-amber-600 hover:text-amber-700"
                       >
-                        Login
+                        {texts?.login || "Login"}
                       </Button>
                     </>
                   ) : (
                     <>
-                      Don't have an account?{" "}
+                      {texts?.dontHaveAccount || "Don't have an account?"}{" "}
                       <Button
                         variant="link"
                         onClick={() => setType("signup")}
                         className="text-amber-600 hover:text-amber-700"
                       >
-                        Sign Up
+                        {texts?.signUp || "Sign Up"}
                       </Button>
                     </>
                   )}

@@ -10,6 +10,8 @@ import { Progress } from "@/components/ui/progress";
 import { decisionFusion, getRecommendationColor, getRecommendationEmoji } from "@/utils/decisionFusion";
 import type { SuitabilityClass, FusionResult } from "@/utils/decisionFusion";
 import { groqJsonQuery } from "@/utils/groqApi";
+import type { PageProps } from "@/types/common";
+import { getUserProfile } from "@/utils/userProfile";
 
 const OPENWEATHER_API_KEY = import.meta.env.VITE_OPENWEATHER_API_KEY || "72cb03ddb9cc38658bd51e4b865978ff";
 
@@ -34,19 +36,15 @@ interface WeatherData {
 }
 
 const cropOptions = [
-  "Rice", "Wheat", "Maize", "Sugarcane", "Cotton", "Pulses", "Potato",
-  "Tomato", "Onion", "Groundnut", "Soybean", "Barley", "Sorghum",
-  "Millets", "Mustard", "Sunflower", "Chili", "Turmeric", "Ginger",
-  "Tea", "Coffee", "Rubber", "Coconut", "Banana", "Mango"
+  "Rice", "Wheat", "Cotton", "Sugarcane", "Maize",
+  "Tomato", "Onion", "Potato", "Soybean", "Groundnut"
 ];
 
 const soilOptions = [
-  "Alluvial Soil", "Black Soil", "Red Soil", "Laterite Soil",
-  "Desert Soil", "Mountain Soil", "Sandy Soil", "Clay Soil",
-  "Loamy Soil", "Saline Soil"
+  "Alluvial", "Red", "Black", "Laterite", "Sandy", "Clay"
 ];
 
-const YieldEstimation = ({ selectedLang, texts, loading: externalLoading }) => {
+const YieldEstimation = ({ selectedLang, texts, loading: externalLoading }: PageProps) => {
   const [location, setLocation] = useState("");
   const [crop, setCrop] = useState("");
   const [soilType, setSoilType] = useState("");
@@ -68,6 +66,13 @@ const YieldEstimation = ({ selectedLang, texts, loading: externalLoading }) => {
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Pre-fill from user profile
+  useEffect(() => {
+    const profile = getUserProfile();
+    if (profile.location) setLocation(profile.location);
+    if (profile.soilType) setSoilType(profile.soilType);
   }, []);
 
   useEffect(() => {
