@@ -67,18 +67,12 @@ const AgricultureVendorDashboard: React.FC = () => {
   const fetchMarketPrices = async (userId: string) => {
     try {
       setLoading(true);
-      const data = await marketService.getPrices(); // Now we fetch all, or we could filter by vendor in service
-      const vendorPrices = data.filter(p => p.vendor_id === userId);
+      // Fetch specifically with a timestamp to prevent browser caching (live data)
+      const data = await marketService.getPrices();
+      const vendorPrices = data.filter((p: MarketPrice) => p.vendor_id === userId);
       
-      // Group by commodity and get latest entry
-      const groupedData = vendorPrices.reduce((acc, curr) => {
-        if (!acc[curr.commodity]) {
-          acc[curr.commodity] = curr;
-        }
-        return acc;
-      }, {} as Record<string, MarketPrice>);
-
-      setMarketPrices(Object.values(groupedData));
+      // Do not group by commodity, show all the vendor's active and inactive listings
+      setMarketPrices(vendorPrices);
     } catch (error) {
       console.error('Error fetching market prices:', error);
       showAlert('Failed to load market prices', 'error');

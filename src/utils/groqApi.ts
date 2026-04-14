@@ -19,12 +19,48 @@ export interface GroqOptions {
 }
 
 /**
+ * Circuit breaker to prevent flooding the API when it's unavailable.
+ * After 3 consecutive failures, pauses all requests for 30 seconds.
+ */
+let _circuitFailures = 0;
+let _circuitOpenUntil = 0;
+const CIRCUIT_THRESHOLD = 3;
+const CIRCUIT_RESET_MS = 30_000;
+
+function checkCircuit(): void {
+  if (_circuitOpenUntil > 0 && Date.now() > _circuitOpenUntil) {
+    // Reset circuit after timeout
+    _circuitFailures = 0;
+    _circuitOpenUntil = 0;
+  }
+  if (_circuitOpenUntil > 0) {
+    throw new Error("API temporarily unavailable (circuit breaker open). Will retry automatically in a few seconds.");
+  }
+}
+
+function recordSuccess(): void {
+  _circuitFailures = 0;
+  _circuitOpenUntil = 0;
+}
+
+function recordFailure(): void {
+  _circuitFailures++;
+  if (_circuitFailures >= CIRCUIT_THRESHOLD) {
+    _circuitOpenUntil = Date.now() + CIRCUIT_RESET_MS;
+    console.warn(`GROQ API circuit breaker opened after ${_circuitFailures} failures. Will retry in ${CIRCUIT_RESET_MS / 1000}s.`);
+  }
+}
+
+/**
  * Send a chat completion request to the GROQ API
  */
 export async function groqChat(
   messages: GroqMessage[],
   options: GroqOptions = {}
 ): Promise<string> {
+  // Check circuit breaker before making request
+  checkCircuit();
+
   const {
     model = DEFAULT_MODEL,
     temperature = 0.3,
@@ -32,25 +68,35 @@ export async function groqChat(
     topP = 0.9,
   } = options;
 
-  const response = await fetch(GROQ_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      messages,
-      options: { model, temperature, maxTokens, topP },
-    }),
-  });
+  try {
+    const response = await fetch(GROQ_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messages,
+        options: { model, temperature, maxTokens, topP },
+      }),
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    console.error("GROQ API error:", response.status, errorData);
-    throw new Error(`GROQ API error: ${response.status}`);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error("GROQ API error:", response.status, errorData);
+      recordFailure();
+      throw new Error(`GROQ API error: ${response.status}`);
+    }
+
+    const data = await response.json().catch(() => ({}));
+    recordSuccess();
+    return data.content || "";
+  } catch (error: any) {
+    // Only record failure for network errors (not already recorded above)
+    if (!error?.message?.includes("GROQ API error:") && !error?.message?.includes("circuit breaker")) {
+      recordFailure();
+    }
+    throw error;
   }
-
-  const data = await response.json().catch(() => ({}));
-  return data.content || "";
 }
 
 /**
@@ -236,9 +282,14 @@ export async function groqTranslate(
 
 /**
  * Health check — verifies the /api/groq endpoint is reachable and GROQ_API_KEY is configured.
- * Useful for diagnosing translation failures.
+ * Respects the circuit breaker: if the circuit is open, returns unhealthy immediately.
  */
 export async function checkGroqApiHealth(): Promise<{ ok: boolean; error?: string }> {
+  // If circuit breaker is open, skip the request
+  if (_circuitOpenUntil > 0 && Date.now() < _circuitOpenUntil) {
+    return { ok: false, error: "API temporarily unavailable" };
+  }
+
   try {
     const response = await fetch(GROQ_API_URL, {
       method: "POST",
@@ -248,10 +299,15 @@ export async function checkGroqApiHealth(): Promise<{ ok: boolean; error?: strin
         options: { maxTokens: 5 },
       }),
     });
-    if (response.ok) return { ok: true };
+    if (response.ok) {
+      recordSuccess();
+      return { ok: true };
+    }
     const data = await response.json().catch(() => ({}));
+    recordFailure();
     return { ok: false, error: data?.error || `HTTP ${response.status}` };
   } catch (e: any) {
+    recordFailure();
     return { ok: false, error: e?.message || "Network error" };
   }
 }

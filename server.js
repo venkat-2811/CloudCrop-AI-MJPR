@@ -217,10 +217,10 @@ app.get('/api/market/prices', async (req, res) => {
 
   try {
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    res.json({ prices: result.rows });
   } catch (e) {
     console.error('Market prices error:', e.message);
-    res.json([]); // fallback to empty → AI estimates on frontend
+    res.json({ prices: [] }); // fallback to empty → AI estimates on frontend
   }
 });
 

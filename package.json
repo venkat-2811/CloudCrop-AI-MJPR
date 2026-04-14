@@ -7,7 +7,8 @@
     "node": "22.x"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k -n api,vite -c blue,green \"node server.js\" \"vite\"",
+    "dev:vite": "vite",
     "dev:api": "node server.js",
     "build": "vite build",
     "build:dev": "vite build --mode development",
@@ -93,6 +94,7 @@
     "@vercel/node": "^3.2.29",
     "@vitejs/plugin-react-swc": "^3.5.0",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.1",
     "eslint": "^9.9.0",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.9",

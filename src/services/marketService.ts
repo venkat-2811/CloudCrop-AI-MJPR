@@ -25,6 +25,7 @@ export const marketService = {
       const params = new URLSearchParams();
       if (commodity) params.set("commodity", commodity);
       if (location) params.set("location", location);
+      params.set("_t", Date.now().toString()); // Cache buster for live data
 
       const res = await fetch(`/api/market/prices?${params.toString()}`);
       if (!res.ok) {
